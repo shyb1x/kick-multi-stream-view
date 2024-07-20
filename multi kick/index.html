@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kick Multi View</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+</head>
+<body>
+    <header>
+        <div class="dropdown">
+            <button class="dropbtn">Streams</button>
+            <div class="dropdown-content" id="current-streams"></div>
+            <div class="description">Extra settings</div>
+        </div>
+        <h1>Kick Multi View</h1>
+        <button id="toggle-ui" class="toggle-ui">Enable Drag/Drop</button>
+        <div id="ui-description" class="description">Enable to organize</div>
+    </header>
+    <main>
+        <div class="input-container">
+            <input type="text" id="username" placeholder="Enter Kick username">
+            <button id="add-stream">+</button>
+        </div>
+        <section>
+            <div id="views-container"></div>
+        </section>
+    </main>
+    <footer>
+        <div class="watermark">Created by <a href="https://kick.com/shoovy" target="_blank">kick.com/shoovy</a></div>
+    </footer>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
