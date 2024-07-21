@@ -4,8 +4,17 @@ document.addEventListener("DOMContentLoaded", function() {
     const viewsContainer = document.getElementById("views-container");
     const currentStreams = document.getElementById("current-streams");
     const toggleUIButton = document.getElementById("toggle-ui");
-    const uiDescription = document.getElementById("ui-description");
+    const toggleUICheckbox = document.getElementById("toggle-ui-checkbox");
+    const sizeSlider = document.getElementById("size-slider");
+    const favoritesList = document.getElementById("favorites-list");
+    const autoFavoriteToggle = document.getElementById("auto-favorite");
+    const backToTopButton = document.getElementById("back-to-top");
+    const backToBottomButton = document.getElementById("back-to-bottom");
     let dragEnabled = false;
+    let pausedStreams = new Set();
+    let playingStreams = new Set();
+    let favoriteStreams = JSON.parse(localStorage.getItem('favoriteStreams')) || [];
+    let savedStreams = JSON.parse(localStorage.getItem('savedStreams')) || [];
 
     addStreamButton.addEventListener("click", addStream);
     usernameInput.addEventListener("keypress", function(event) {
@@ -14,7 +23,23 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     });
 
-    toggleUIButton.addEventListener("click", toggleUI);
+    toggleUICheckbox.addEventListener("change", toggleUI);
+    sizeSlider.addEventListener("input", adjustStreamSize);
+    autoFavoriteToggle.addEventListener("change", function() {
+        if (this.checked) {
+            document.getElementById("auto-favorite-label").style.color = '#4CAF50';
+        } else {
+            document.getElementById("auto-favorite-label").style.color = '#ccc';
+        }
+    });
+
+    backToTopButton.addEventListener("click", function() {
+        viewsContainer.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    backToBottomButton.addEventListener("click", function() {
+        viewsContainer.scrollTo({ top: viewsContainer.scrollHeight, behavior: 'smooth' });
+    });
 
     function addStream() {
         const username = usernameInput.value.trim();
@@ -24,10 +49,10 @@ document.addEventListener("DOMContentLoaded", function() {
             view.id = `view-${username}`;
 
             const iframe = document.createElement("iframe");
-            iframe.src = `https://player.kick.com/${username}`;
+            iframe.src = `https://cxwatcher.github.io/embed.html?user=${username}`;
             iframe.frameBorder = "0";
             iframe.allow = "autoplay";
-            iframe.scrolling = "no"; /* Prevent iframe scrolling */
+            iframe.scrolling = "no"; 
             iframe.id = `iframe-${username}`;
             iframe.allowFullscreen = true;
             iframe.webkitallowfullscreen = true;
@@ -37,8 +62,16 @@ document.addEventListener("DOMContentLoaded", function() {
                 setTimeout(() => {
                     sendCommandToIframe(iframe, "unMute");
                     sendCommandToIframe(iframe, "playVideo");
-                }, 1000); // Delay to ensure the iframe is fully loaded
+                    playingStreams.add(username);
+                }, 1000);
             };
+            iframe.addEventListener('fullscreenchange', function() {
+                if (document.fullscreenElement) {
+                    pauseAllStreamsExcept(username);
+                } else {
+                    resumePausedStreams();
+                }
+            });
             view.appendChild(iframe);
 
             viewsContainer.appendChild(view);
@@ -46,6 +79,11 @@ document.addEventListener("DOMContentLoaded", function() {
             usernameInput.value = "";
             resizeViews();
             makeDraggable();
+            adjustStreamSize();
+            if (autoFavoriteToggle.checked) {
+                addFavoriteOption(username);
+            }
+            saveCurrentStreams();
         }
     }
 
@@ -75,22 +113,29 @@ document.addEventListener("DOMContentLoaded", function() {
             viewsContainer.removeChild(document.getElementById(`view-${username}`));
             currentStreams.removeChild(streamItem);
             resizeViews();
+            adjustStreamSize(); // Fix sizes after removing
+            saveCurrentStreams();
+        });
+
+        const favoriteButton = document.createElement("button");
+        favoriteButton.textContent = "★";
+        favoriteButton.style.color = favoriteStreams.includes(username) ? "yellow" : "grey";
+        favoriteButton.addEventListener("click", function() {
+            toggleFavorite(username);
+            favoriteButton.style.color = favoriteStreams.includes(username) ? "yellow" : "grey";
         });
 
         streamItem.appendChild(nameSpan);
         streamItem.appendChild(colorSelect);
         streamItem.appendChild(removeButton);
+        streamItem.appendChild(favoriteButton);
         currentStreams.appendChild(streamItem);
     }
 
     function resizeViews() {
         const views = document.querySelectorAll(".view");
-        const viewCount = views.length;
-        const width = 100 / 8; // Slightly larger
-        const height = 75 / 5; // Slightly taller
         views.forEach(view => {
-            view.style.width = `${width}%`;
-            view.style.height = `calc(${height}vh - 10px)`;
+            view.style.height = `calc(20% - 10px)`; // Slightly taller
         });
     }
 
@@ -98,7 +143,6 @@ document.addEventListener("DOMContentLoaded", function() {
         $(function() {
             $("#views-container").sortable({
                 update: function(event, ui) {
-                    // Prevent iframe reload on drag end
                     ui.item[0].querySelector('iframe').src += '';
                 }
             }).sortable("option", "axis", "");
@@ -107,27 +151,152 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
     function toggleUI() {
-        dragEnabled = !dragEnabled;
+        dragEnabled = toggleUICheckbox.checked;
         if (dragEnabled) {
             document.body.classList.add("drag-enabled");
             toggleUIButton.textContent = "Disable Drag/Drop";
-            uiDescription.textContent = "Disable to toggle mute/pause on stream";
         } else {
             document.body.classList.remove("drag-enabled");
             toggleUIButton.textContent = "Enable Drag/Drop";
-            uiDescription.textContent = "Enable to organize";
         }
     }
 
-    function sendCommandToIframe(iframe, command) {
-        const message = { event: "command", func: command, args: [] };
+    function sendCommandToIframe(iframe, command, args = []) {
+        const message = { event: "command", func: command, args };
         iframe.contentWindow.postMessage(JSON.stringify(message), "*");
     }
 
-    makeDraggable(); // Initialize draggable functionality
+    function adjustStreamSize() {
+        const sizeValue = sizeSlider.value;
+        const views = document.querySelectorAll(".view");
+        const minWidth = 100 / 8;
+        const maxWidth = 100;
+        const minHeight = 20;
+        const maxHeight = 100;
 
-    // Start with drag and drop disabled
+        const newWidth = minWidth + ((maxWidth - minWidth) * sizeValue / 100);
+        const newHeight = minHeight + ((maxHeight - minHeight) * sizeValue / 100);
+
+        views.forEach(view => {
+            view.style.width = `${newWidth}%`;
+            view.style.height = `calc(${newHeight}vh - 10px)`;
+        });
+    }
+
+    function pauseAllStreamsExcept(activeUsername) {
+        const iframes = document.querySelectorAll("iframe");
+        iframes.forEach(iframe => {
+            const username = iframe.id.split('-')[1];
+            if (username !== activeUsername && !pausedStreams.has(username)) {
+                sendCommandToIframe(iframe, "pauseVideo");
+                playingStreams.delete(username);
+                pausedStreams.add(username);
+            }
+        });
+    }
+
+    function resumePausedStreams() {
+        pausedStreams.forEach(username => {
+            const iframe = document.getElementById(`iframe-${username}`);
+            sendCommandToIframe(iframe, "playVideo");
+            playingStreams.add(username);
+        });
+        pausedStreams.clear();
+    }
+
+    function addFavoriteOption(username) {
+        if (!favoriteStreams.includes(username)) {
+            favoriteStreams.push(username);
+            localStorage.setItem('favoriteStreams', JSON.stringify(favoriteStreams));
+            renderFavorites();
+        }
+    }
+
+    function toggleFavorite(username) {
+        if (favoriteStreams.includes(username)) {
+            favoriteStreams = favoriteStreams.filter(fav => fav !== username);
+        } else {
+            favoriteStreams.push(username);
+        }
+        localStorage.setItem('favoriteStreams', JSON.stringify(favoriteStreams));
+        renderFavorites();
+    }
+
+    function renderFavorites() {
+        favoritesList.innerHTML = '';
+        favoriteStreams.forEach(username => {
+            const favoriteItem = document.createElement("div");
+            favoriteItem.classList.add("favorite-item");
+
+            const nameSpan = document.createElement("span");
+            nameSpan.textContent = username;
+
+            const addButton = document.createElement("button");
+            addButton.textContent = "Add";
+            addButton.addEventListener("click", function() {
+                usernameInput.value = username;
+                addStream();
+            });
+
+            favoriteItem.appendChild(nameSpan);
+            favoriteItem.appendChild(addButton);
+            favoritesList.appendChild(favoriteItem);
+        });
+    }
+
+    function saveCurrentStreams() {
+        const currentStreams = [];
+        const views = document.querySelectorAll(".view");
+        views.forEach(view => {
+            const username = view.id.split('-')[1];
+            currentStreams.push(username);
+        });
+        localStorage.setItem('savedStreams', JSON.stringify(currentStreams));
+    }
+
+    function loadSavedStreams() {
+        savedStreams.forEach(username => {
+            usernameInput.value = username;
+            addStream();
+        });
+    }
+
+    // Mouse hiding functionality
+    let mouseTimer;
+    let isMouseHidden = false;
+    let lastMousePosition = { x: 0, y: 0 };
+
+    function hideMouse() {
+        document.body.style.cursor = 'none';
+        isMouseHidden = true;
+    }
+
+    function showMouse() {
+        document.body.style.cursor = 'default';
+        isMouseHidden = false;
+    }
+
+    document.addEventListener('mousemove', (event) => {
+        clearTimeout(mouseTimer);
+        const currentMousePosition = { x: event.clientX, y: event.clientY };
+        const distance = Math.hypot(currentMousePosition.x - lastMousePosition.x, currentMousePosition.y - lastMousePosition.y);
+
+        if (isMouseHidden || distance > 10) {
+            showMouse();
+        }
+
+        lastMousePosition = currentMousePosition;
+        mouseTimer = setTimeout(() => {
+            if (!document.querySelector('.view iframe:hover')) {
+                hideMouse();
+            }
+        }, 1000);
+    });
+
+    makeDraggable();
     document.body.classList.remove("drag-enabled");
+    toggleUICheckbox.checked = false;
     toggleUIButton.textContent = "Enable Drag/Drop";
-    uiDescription.textContent = "Enable to organize";
+    renderFavorites();
+    loadSavedStreams();
 });
